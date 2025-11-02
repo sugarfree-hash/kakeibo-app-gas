@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家計簿入力</title>
+      <style>
+        /* 簡易的なCSSでスマホ向けに調整 */
+        body {
+          font-family: Arial, sans-serif;
+          padding: 15px;
+          max-width: 400px;
+          margin: auto;
+          background-color: #f4f4f9;
+        }
+        h2 {
+          text-align: center;
+          color: #333;
+        }
+        
+        /* ★★★ 最終修正：すべてのラベル、入力、選択ボックスをブロック要素に設定 ★★★ */
+        /* 各要素を縦に並べるための基本設定 */
+        label, input, select {
+          display: block; /* 強制的にブロック要素にし、必ず改行させる */
+          width: 100%; 
+          box-sizing: border-box;
+          margin: 0; 
+        }
+        
+        /* 入力グループごとの余白を設定 */
+        .input-group {
+          margin-bottom: 15px;
+        }
+
+        /* ラベルのスタイル */
+        .input-group label {
+            font-weight: bold;
+            margin-bottom: 5px; 
+            padding: 0;
+            border: none;
+        }
+
+        /* 入力フィールドとセレクトボックスの見た目を調整 */
+        .input-group input[type="number"], 
+        .input-group input[type="text"], 
+        .input-group input[type="date"], 
+        .input-group select {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-top: 0; /* ラベルとの間はmargin-bottom: 5px;で調整 */
+        }
+        
+        /* ボタンのスタイルは省略（前回と同じ） */
+        button {
+          background-color: #4CAF50;
+          color: white;
+          padding: 14px 20px;
+          margin: 8px 0;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          width: 100%;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        #loading {
+          display: none;
+          text-align: center;
+          color: #666;
+        }
+      </style>
+  </head>
+<body>
+
+  <h2>💸 家計簿</h2>
+
+  <form id="kakeiboForm">
+
+    <div class="input-group">
+      <label for="date">日付 (必須)</label>
+      <input type="date" id="date" name="date" required>
+    </div>
+
+    <div class="input-group">
+      <label for="amount">金額 (必須)</label>
+      <input type="number" id="amount" name="amount" required placeholder="0">
+    </div>
+
+    <div class="input-group">
+      <label for="item">費目</label>
+      <select id="item" name="item">
+        <option value="食費">食費</option>
+        <option value="交通費">交通費</option>
+        <option value="日用品">日用品</option>
+        <option value="娯楽">娯楽</option>
+        <option value="美容代">美容代</option>
+        <option value="通信費">通信費</option>
+        <option value="交際費">交際費</option>
+        <option value="その他">その他</option>
+        <option value="収入">収入</option>
+      </select>
+    </div>
+
+    <div class="input-group">
+      <label for="memo">メモ</label>
+      <input type="text" id="memo" name="memo">
+    </div>
+
+    <button type="button" onclick="submitForm()">登録</button>
+  </form>
+
+  <p id="loading">処理中...</p>
+
+  <hr>
+
+  <div id="summary-area">
+    <h3>今月の支出</h3>
+    <p id="current-month-display"></p>
+    <div id="loading-summary">集計中...</div>
+    <div id="summary-content" style="display: none;">
+        <p><strong>総額: </strong><span id="monthly-total">0円</span></p>
+        <h4>費目別割合:</h4>
+        <ul id="breakdown-list">
+            </ul>
+    </div>
+  </div>
+  
+  <p id="summary-error" style="color: red; display: none;"></p>
+
+  <script>
+    /**
+     * フォームデータを取得し、GASサーバー側関数を呼び出す
+     */
+    function submitForm() {
+      const form = document.getElementById('kakeiboForm');
+      const date = document.getElementById('date').value;
+      const amount = document.getElementById('amount').value;
+
+      // 金額が入力されているかチェック
+      if (!date) {
+        alert('日付を入力してください。');
+        return;
+      }
+
+      // 金額が入力されているかチェック
+      if (!amount) {
+        alert('金額を入力してください。');
+        return;
+      }
+      
+      // フォームデータをオブジェクトとして取得
+      const formData = {
+        date: form.date.value,
+        amount: form.amount.value,
+        item: form.item.value,
+        memo: form.memo.value
+      };
+      
+      // フォームを非表示にし、ローディングメッセージを表示
+      form.style.display = 'none';
+      document.getElementById('loading').style.display = 'block';
+
+      // サーバー側のrecordKakeibo関数を非同期で実行し、結果をhandleResponseで受け取る
+      google.script.run
+        .withSuccessHandler(handleResponse)
+        .recordKakeibo(formData);
+    }
+
+    /**
+     * GASサーバー側からの応答を処理する
+     * @param {string} response - サーバーからのメッセージ
+     */
+    function handleResponse(response) {
+      alert(response); // 成功またはエラーメッセージを表示
+      
+      // フォームをリセットし、再表示
+      document.getElementById('kakeiboForm').reset();
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('kakeiboForm').style.display = 'block';
+    }
+
+    // index.html (既存の JavaScriptコードの下に追加)
+
+  /**
+  * GASサーバーから集計データを取得し、画面に表示する
+  */
+  function loadSummary() {
+    document.getElementById('loading-summary').style.display = 'block';
+    document.getElementById('summary-content').style.display = 'none';
+    document.getElementById('summary-error').style.display = 'none';
+    
+    // 現在の年月を表示
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    document.getElementById('current-month-display').textContent = `${year}年 ${month}月`;
+
+    google.script.run
+        .withSuccessHandler(displaySummary)
+        .getMonthlySummary();
+  }
+
+  /**
+  * サーバーから受け取った集計結果を画面に表示する
+  * @param {object} summaryData - サーバーからの集計データ
+  */
+  function displaySummary(summaryData) {
+    document.getElementById('loading-summary').style.display = 'none';
+
+    if (summaryData.error) {
+        document.getElementById('summary-error').textContent = '集計エラー: ' + summaryData.error;
+        document.getElementById('summary-error').style.display = 'block';
+        return;
+    }
+    
+    document.getElementById('summary-content').style.display = 'block';
+    
+    // 1. 総額の表示
+    document.getElementById('monthly-total').textContent = summaryData.totalExpense + '円';
+
+    // 2. 費目別割合の表示
+    const breakdownList = document.getElementById('breakdown-list');
+    breakdownList.innerHTML = ''; // リストをクリア
+    
+    const breakdown = summaryData.breakdown;
+
+    // 総支出が0円の場合の表示をここでガード
+    if (Object.keys(breakdown).length === 0) {
+        breakdownList.textContent = '今月、まだ支出の記録がありません。';
+        return; 
+    }
+    
+    // 割合が高い順にソート
+    const sortedCategories = Object.keys(breakdown).sort((a, b) => {
+      // 修正箇所: 文字列を数値に変換して比較する
+      const percB = parseFloat(breakdown[b].percentage);
+      const percA = parseFloat(breakdown[a].percentage);
+      return percB - percA;
+    });
+
+    sortedCategories.forEach(item => {
+        const data = breakdown[item];
+        const li = document.createElement('li');
+        li.textContent = `${item}: ${data.amount}円 (${data.percentage}%)`;
+        breakdownList.appendChild(li);
+    });
+  }
+
+  // 既存の window.onload 関数に集計処理を追加
+  window.onload = function() {
+    document.getElementById('date').valueAsDate = new Date();
+    loadSummary(); // ページ読み込み時に集計を呼び出す
+  };
+
+  // 既存の handleResponse 関数にも集計処理を追加 (データ登録後)
+  function handleResponse(response) {
+    alert(response); 
+    document.getElementById('kakeiboForm').reset();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('kakeiboForm').style.display = 'block';
+    document.getElementById('date').valueAsDate = new Date();
+    
+    loadSummary(); // データ登録後、集計を更新する
+  }
+  </script>
+</body>
+</html>
