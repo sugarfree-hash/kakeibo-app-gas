@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>家計簿入力</title>
       <style>
-        /* 簡易的なCSSでスマホ向けに調整 */
         body {
           font-family: Arial, sans-serif;
           padding: 15px;
@@ -18,21 +17,17 @@
           color: #333;
         }
         
-        /* ★★★ 最終修正：すべてのラベル、入力、選択ボックスをブロック要素に設定 ★★★ */
-        /* 各要素を縦に並べるための基本設定 */
         label, input, select {
-          display: block; /* 強制的にブロック要素にし、必ず改行させる */
+          display: block; 
           width: 100%; 
           box-sizing: border-box;
           margin: 0; 
         }
         
-        /* 入力グループごとの余白を設定 */
         .input-group {
           margin-bottom: 15px;
         }
 
-        /* ラベルのスタイル */
         .input-group label {
             font-weight: bold;
             margin-bottom: 5px; 
@@ -40,18 +35,14 @@
             border: none;
         }
 
-        /* 入力フィールドとセレクトボックスの見た目を調整 */
-        .input-group input[type="number"], 
-        .input-group input[type="text"], 
-        .input-group input[type="date"], 
+        .input-group input, 
         .input-group select {
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            margin-top: 0; /* ラベルとの間はmargin-bottom: 5px;で調整 */
+            margin-top: 0; 
         }
         
-        /* ボタンのスタイルは省略（前回と同じ） */
         button {
           background-color: #4CAF50;
           color: white;
@@ -70,6 +61,33 @@
           display: none;
           text-align: center;
           color: #666;
+        }
+
+        /* 集計エリアのスタイル */
+        #summary-area {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .month-selector {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .month-btn {
+            background-color: #ddd;
+            color: #333;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            width: auto;
+            font-size: 14px;
+        }
+        .month-btn:hover {
+            background-color: #ccc;
         }
       </style>
   </head>
@@ -117,12 +135,21 @@
   <hr>
 
   <div id="summary-area">
-    <h3>今月の支出</h3>
-    <p id="current-month-display"></p>
+    <!-- 月切り替えボタン -->
+    <div class="month-selector">
+        <button class="month-btn" onclick="changeMonth(-1)">⬅️ 先月</button>
+        <h3 id="current-month-display" style="margin: 0;"></h3>
+        <button class="month-btn" onclick="changeMonth(1)">翌月 ➡️</button>
+    </div>
+
     <div id="loading-summary">集計中...</div>
+    
     <div id="summary-content" style="display: none;">
-        <p><strong>総額: </strong><span id="monthly-total">0円</span></p>
-        <h4>費目別割合:</h4>
+        <p><strong>総支出: </strong><span id="monthly-total-expense">0円</span></p>
+        <!-- 収入は控えめに表示 -->
+        <p style="font-size: 0.9em; color: #666;">(総収入: <span id="monthly-total-income">0円</span>)</p>
+        
+        <h4>費目別割合 (支出):</h4>
         <ul id="breakdown-list">
             </ul>
     </div>
@@ -131,27 +158,37 @@
   <p id="summary-error" style="color: red; display: none;"></p>
 
   <script>
-    /**
-     * フォームデータを取得し、GASサーバー側関数を呼び出す
-     */
+    // 現在表示している集計の年月
+    let displayYear;
+    let displayMonth;
+
+    // 安全にGAS関数を呼び出すためのラッパー
+    function callGas(method, successHandler, ...args) {
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run.withSuccessHandler(successHandler)[method](...args);
+      } else {
+        console.warn(`google.script.run.${method} called outside of GAS environment.`);
+        // プレビュー環境等でのモック動作
+        const mockData = {
+          recordKakeibo: "GAS環境外のため記録されません（プレビュー用メッセージ）",
+          getMonthlySummary: { 
+            year: args[0], month: args[1], 
+            totalExpense: "---", totalIncome: "---", breakdown: {}, 
+            error: "GAS環境外です。デプロイ後のURLで動作を確認してください。" 
+          }
+        };
+        setTimeout(() => successHandler(mockData[method]), 500);
+      }
+    }
+
     function submitForm() {
       const form = document.getElementById('kakeiboForm');
       const date = document.getElementById('date').value;
       const amount = document.getElementById('amount').value;
 
-      // 金額が入力されているかチェック
-      if (!date) {
-        alert('日付を入力してください。');
-        return;
-      }
-
-      // 金額が入力されているかチェック
-      if (!amount) {
-        alert('金額を入力してください。');
-        return;
-      }
+      if (!date) { alert('日付を入力してください。'); return; }
+      if (!amount) { alert('金額を入力してください。'); return; }
       
-      // フォームデータをオブジェクトとして取得
       const formData = {
         date: form.date.value,
         amount: form.amount.value,
@@ -159,112 +196,111 @@
         memo: form.memo.value
       };
       
-      // フォームを非表示にし、ローディングメッセージを表示
       form.style.display = 'none';
       document.getElementById('loading').style.display = 'block';
 
-      // サーバー側のrecordKakeibo関数を非同期で実行し、結果をhandleResponseで受け取る
-      google.script.run
-        .withSuccessHandler(handleResponse)
-        .recordKakeibo(formData);
+      callGas('recordKakeibo', handleResponse, formData);
     }
 
-    /**
-     * GASサーバー側からの応答を処理する
-     * @param {string} response - サーバーからのメッセージ
-     */
     function handleResponse(response) {
-      alert(response); // 成功またはエラーメッセージを表示
-      
-      // フォームをリセットし、再表示
+      alert(response); 
       document.getElementById('kakeiboForm').reset();
       document.getElementById('loading').style.display = 'none';
       document.getElementById('kakeiboForm').style.display = 'block';
+      
+      // 日付をリセット（今日の日付をセット）
+      setTodayDate();
+      
+      // 登録したデータに合わせて、今月の集計を再読み込み
+      resetToCurrentMonth();
     }
 
-    // index.html (既存の JavaScriptコードの下に追加)
+    // --- 集計関連の処理 ---
 
-  /**
-  * GASサーバーから集計データを取得し、画面に表示する
-  */
-  function loadSummary() {
-    document.getElementById('loading-summary').style.display = 'block';
-    document.getElementById('summary-content').style.display = 'none';
-    document.getElementById('summary-error').style.display = 'none';
-    
-    // 現在の年月を表示
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
-    document.getElementById('current-month-display').textContent = `${year}年 ${month}月`;
-
-    google.script.run
-        .withSuccessHandler(displaySummary)
-        .getMonthlySummary();
-  }
-
-  /**
-  * サーバーから受け取った集計結果を画面に表示する
-  * @param {object} summaryData - サーバーからの集計データ
-  */
-  function displaySummary(summaryData) {
-    document.getElementById('loading-summary').style.display = 'none';
-
-    if (summaryData.error) {
-        document.getElementById('summary-error').textContent = '集計エラー: ' + summaryData.error;
-        document.getElementById('summary-error').style.display = 'block';
-        return;
+    function resetToCurrentMonth() {
+        const now = new Date();
+        displayYear = now.getFullYear();
+        displayMonth = now.getMonth() + 1; 
+        loadSummary(displayYear, displayMonth);
     }
-    
-    document.getElementById('summary-content').style.display = 'block';
-    
-    // 1. 総額の表示
-    document.getElementById('monthly-total').textContent = summaryData.totalExpense + '円';
 
-    // 2. 費目別割合の表示
-    const breakdownList = document.getElementById('breakdown-list');
-    breakdownList.innerHTML = ''; // リストをクリア
-    
-    const breakdown = summaryData.breakdown;
-
-    // 総支出が0円の場合の表示をここでガード
-    if (Object.keys(breakdown).length === 0) {
-        breakdownList.textContent = '今月、まだ支出の記録がありません。';
-        return; 
+    function changeMonth(offset) {
+        displayMonth += offset;
+        
+        if (displayMonth < 1) {
+            displayMonth = 12;
+            displayYear--;
+        } else if (displayMonth > 12) {
+            displayMonth = 1;
+            displayYear++;
+        }
+        
+        loadSummary(displayYear, displayMonth);
     }
-    
-    // 割合が高い順にソート
-    const sortedCategories = Object.keys(breakdown).sort((a, b) => {
-      // 修正箇所: 文字列を数値に変換して比較する
-      const percB = parseFloat(breakdown[b].percentage);
-      const percA = parseFloat(breakdown[a].percentage);
-      return percB - percA;
-    });
 
-    sortedCategories.forEach(item => {
-        const data = breakdown[item];
-        const li = document.createElement('li');
-        li.textContent = `${item}: ${data.amount}円 (${data.percentage}%)`;
-        breakdownList.appendChild(li);
-    });
-  }
+    function loadSummary(year, month) {
+      document.getElementById('loading-summary').style.display = 'block';
+      document.getElementById('summary-content').style.display = 'none';
+      document.getElementById('summary-error').style.display = 'none';
+      
+      document.getElementById('current-month-display').textContent = `${year}年 ${month}月`;
 
-  // 既存の window.onload 関数に集計処理を追加
-  window.onload = function() {
-    document.getElementById('date').valueAsDate = new Date();
-    loadSummary(); // ページ読み込み時に集計を呼び出す
-  };
+      callGas('getMonthlySummary', displaySummary, year, month);
+    }
 
-  // 既存の handleResponse 関数にも集計処理を追加 (データ登録後)
-  function handleResponse(response) {
-    alert(response); 
-    document.getElementById('kakeiboForm').reset();
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('kakeiboForm').style.display = 'block';
-    document.getElementById('date').valueAsDate = new Date();
-    
-    loadSummary(); // データ登録後、集計を更新する
-  }
+    function displaySummary(summaryData) {
+      document.getElementById('loading-summary').style.display = 'none';
+
+      if (summaryData.error) {
+          document.getElementById('summary-error').textContent = summaryData.error;
+          document.getElementById('summary-error').style.display = 'block';
+          // エラーがあっても一部表示するためにcontentを出す
+          document.getElementById('summary-content').style.display = 'block';
+          return;
+      }
+      
+      document.getElementById('summary-content').style.display = 'block';
+      document.getElementById('monthly-total-expense').textContent = summaryData.totalExpense + '円';
+      document.getElementById('monthly-total-income').textContent = summaryData.totalIncome + '円';
+
+      const breakdownList = document.getElementById('breakdown-list');
+      breakdownList.innerHTML = ''; 
+      
+      const breakdown = summaryData.breakdown;
+      
+      if (!breakdown || Object.keys(breakdown).length === 0) {
+          breakdownList.textContent = 'データがありません。';
+          return; 
+      }
+      
+      const sortedCategories = Object.keys(breakdown).sort((a, b) => {
+          const percB = parseFloat(breakdown[b].percentage);
+          const percA = parseFloat(breakdown[a].percentage);
+          return percB - percA;
+      });
+
+      sortedCategories.forEach(item => {
+          const data = breakdown[item];
+          const li = document.createElement('li');
+          li.textContent = `${item}: ${data.amount}円 (${data.percentage}%)`;
+          breakdownList.appendChild(li);
+      });
+    }
+
+    function setTodayDate() {
+        const now = new Date(); // ブラウザのローカル時間（JST）を取得
+        const yyyy = now.getFullYear();
+        const mm = ('0' + (now.getMonth() + 1)).slice(-2);
+        const dd = ('0' + now.getDate()).slice(-2);
+        
+        // 文字列としてセットすることで、タイムゾーンのズレを防ぎ2026年を表示
+        document.getElementById('date').value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    window.onload = function() {
+      setTodayDate();
+      resetToCurrentMonth();
+    };
   </script>
 </body>
 </html>
